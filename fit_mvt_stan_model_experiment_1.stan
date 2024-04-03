@@ -1,52 +1,72 @@
 //aria:compile=0
 data {
-	int NS;
-	int K;
-	int choose_stay[K];
-	int<lower=1,upper=NS> which_S[K];
-	vector[K] total_reward;
-	vector[K] total_harvest_periods;
-	vector[K] number_trees;
-	vector[K] expected_reward;
-	vector[K] is_Matching;
-	vector[K] is_Mismatching;
-	vector[K] is_small;
-	vector[K] is_large;
+  int NS; // number of particiants
+  int K; // length of all trials for all participants 
+  array[K] int choose_stay; // whether participant exits the patch (0) or not (1)
+  array[K] int<lower=1, upper=NS> which_S;
+  vector[K] total_reward; // total rewards per block type
+  vector[K] total_harvest_periods; // time spent per block type
+  vector[K] number_trees; // how many trees visited per block type
+  vector[K] expected_reward; // reward expected on a trial 
+  vector[K] is_Matching; // 1 = congruent trial block, 0 = not 
+  vector[K] is_Mismatching; // 1 = interference trial block, 0 = not 
+  vector[K] is_small; // 1 = physical low efffort block, 0 = not 
+  vector[K] is_large; // 1 = physical high efffort block, 0 = not 
+} 
+
+transformed data {
+  // fixed effects prior ~ N(X_mu_prior, X_s_prior)
+  // [1] = log inv_temp
+  // [2] = cost_congruent
+  // [3] = cost_interference
+  // [4] = cost_small
+  // [5] = cost_large
+  vector[5] gam_mu_prior = [0, 0, 0, 0, 0]';     // mean of fixed effect prior
+  vector[5] gam_s_prior  = [0.5, 40, 30, 40, 30]'; // sd of fixed effect prior
+  vector[5] tau_mu_prior = [0.5, 20, 15, 20, 15]'; // mean of random variance prior
+  vector[5] tau_s_prior  = [0.5, 20, 15, 20, 15]'; // sd of random variance prior
+} 
+
+parameters { 
+  // [1] = log inv_temp
+  // [2] = cost_congruent
+  // [3] = cost_interference
+  // [4] = cost_small
+  // [5] = cost_large
+  // session mean parameters
+  vector[5] mu;           //  fixed effects 
+  vector<lower=0>[5] tau; // spread of random effects
+  // reparameterization, all random effects in a single matrix
+  matrix[5, NS] U_pr;            // uncorreleated random effects
+  cholesky_factor_corr[5] L_u;  // decomposition of corr matrix to lower triangular matrix
 }
 
-transformed data{
-	vector[5] tau_prior_OM = [.5,40,30,40,30]';
-	vector[5] beta_prior_OM = [0,0,0,0,0]';
-
-}
-
-parameters {
-	vector<offset=beta_prior_OM,multiplier=tau_prior_OM>[5] beta_ms; // group betas
-	vector<lower=0>[5] tau_raw ;	// betas covariance scale
-	matrix[NS,5] beta_s; //per subject betas
-	cholesky_factor_corr[5] omega;   // betas covariance correlation
-	// beta_ms[1] = inv_temp
-	// beta_ms[2] = cost_Matching
-	// beta_ms[3] = cost_Mismatching
-	// beta_ms[4] = cost_small
-	// beta_ms[5] = cost_large 
-}
-
-transformed parameters{
-	vector[5] tau = tau_raw .* tau_prior_OM ;
+transformed parameters {
+  matrix[NS, 5] U;      // random effects
+  matrix[NS, 5] beta_s; // fixed + random effects
+  // transform random effects
+  // these have dimensions NS x Number of parameters
+  // for example,
+  // U[1,1]   = random effect inv. temp for subject 1
+  // U[10, 3] = random effect of cost incongruent for subject 10
+  U = (diag_pre_multiply(tau, L_u) * U_pr)';
+  
+  // compute fixed + random effect for each subject      
+  for(i in 1:NS) {
+  	for(p in 1:5) {
+    beta_s[i,p] = mu[p] + U[i,p]; 
+  }
+  
 }
 
 model {
-	omega ~ lkj_corr_cholesky(1); // prior on correlation
-	tau_raw ~ normal(1,1); // prior on covariance scale
-	beta_ms ~ normal(beta_prior_OM, tau_prior_OM); // prior on group betas
-	matrix[5,5] L_omega = diag_pre_multiply(tau, omega) ;
-	for (s in 1:NS) {
-		beta_s[s] ~ multi_normal_cholesky(
-			beta_ms
-			, L_omega
-		);
-	}
+  // priors (adjusted for bounds)
+  target += normal_lpdf(mu  | gam_mu_prior, gam_s_prior);
+  target += normal_lpdf(tau | tau_mu_prior, tau_s_prior) - 5*normal_lccdf(0 | tau_mu_prior, tau_s_prior);
+  target += lkj_corr_cholesky_lpdf(L_u | 1);
+  target += std_normal_lpdf(to_vector(U_pr));
+  
+  // likelihood
 	target += bernoulli_logit_lpmf(choose_stay |
 		(beta_s[which_S,1]).*(
 			expected_reward
@@ -64,8 +84,9 @@ model {
 			)
 		)
 	) ;
-}
-generated quantities{
-	// r: correlations
-	matrix[5,5] r = multiply_lower_tri_self_transpose(omega) ;
+  }
+  
+generated quantities {
+  // "recompose" Choleksy to corr matrix
+  corr_matrix[5] rho = L_u * L_u';
 }

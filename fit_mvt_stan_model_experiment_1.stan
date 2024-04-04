@@ -55,8 +55,8 @@ transformed parameters {
   for(i in 1:NS) {
   	for(p in 1:5) {
     beta_s[i,p] = mu[p] + U[i,p]; 
+    }
   }
-  
 }
 
 model {
@@ -65,26 +65,32 @@ model {
   target += normal_lpdf(tau | tau_mu_prior, tau_s_prior) - 5*normal_lccdf(0 | tau_mu_prior, tau_s_prior);
   target += lkj_corr_cholesky_lpdf(L_u | 1);
   target += std_normal_lpdf(to_vector(U_pr));
-  
   // likelihood
-	target += bernoulli_logit_lpmf(choose_stay |
-		(beta_s[which_S,1]).*(
-			expected_reward
-			- is_Matching.*(
-				(total_reward - beta_s[which_S,2].*number_trees)./total_harvest_periods
-			)
-			- is_Mismatching.*(
-				(total_reward - (beta_s[which_S,2]+(beta_s[which_S,3])).*number_trees)./total_harvest_periods
-			)
-			- is_small.*(
-				(total_reward - beta_s[which_S,4].*number_trees)./total_harvest_periods
-			)
-			- is_large.*(
-				(total_reward - (beta_s[which_S,4]+(beta_s[which_S,5])).*number_trees)./total_harvest_periods
-			)
-		)
-	) ;
-  }
+    choose_stay ~ bernoulli_logit((exp(beta_s[which_S, 1]))
+                                .* (expected_reward
+                                    - is_Matching
+                                      .* ((total_reward
+                                           - beta_s[which_S, 2]
+                                             .* number_trees)
+                                          ./ total_harvest_periods)
+                                    - is_Mismatching
+                                      .* ((total_reward
+                                           - (beta_s[which_S, 2]
+                                              + (beta_s[which_S, 3]))
+                                             .* number_trees)
+                                          ./ total_harvest_periods)
+                                    - is_small
+                                      .* ((total_reward
+                                           - beta_s[which_S, 4]
+                                             .* number_trees)
+                                          ./ total_harvest_periods)
+                                    - is_large
+                                      .* ((total_reward
+                                           - (beta_s[which_S, 4]
+                                              + (beta_s[which_S, 5]))
+                                             .* number_trees)
+                                          ./ total_harvest_periods)));
+}
   
 generated quantities {
   // "recompose" Choleksy to corr matrix
